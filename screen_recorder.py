@@ -24,6 +24,7 @@ class ScreenRecorder(QThread):
         self.frame_interval = 1.0 / frame_rate
         self.frames = []
         self.start_time = None
+        self.cursor_img = cv2.imread('cursor.png', cv2.IMREAD_UNCHANGED)  # Load the cursor image with alpha channel
 
     def run(self):
         self.recording = True
@@ -42,12 +43,17 @@ class ScreenRecorder(QThread):
                 cursor_x, cursor_y = pyautogui.position()
                 cursor_x -= self.target_frame[0]
                 cursor_y -= self.target_frame[1]
-                cursor_img = pyautogui.screenshot(region=(cursor_x, cursor_y, 16, 16))
-                cursor_img = cv2.cvtColor(np.array(cursor_img), cv2.COLOR_BGR2RGB)
 
-                # Ensure the cursor image is within the bounds of the frame
-                if 0 <= cursor_x < frame.shape[1] - 16 and 0 <= cursor_y < frame.shape[0] - 16:
-                    frame[cursor_y:cursor_y+16, cursor_x:cursor_x+16] = cursor_img
+                # Overlay the cursor image on the frame
+                if 0 <= cursor_x < frame.shape[1] and 0 <= cursor_y < frame.shape[0]:
+                    cursor_h, cursor_w = self.cursor_img.shape[:2]
+                    if cursor_x + cursor_w <= frame.shape[1] and cursor_y + cursor_h <= frame.shape[0]:
+                        alpha_s = self.cursor_img[:, :, 3] / 255.0
+                        alpha_l = 1.0 - alpha_s
+
+                        for c in range(0, 3):
+                            frame[cursor_y:cursor_y+cursor_h, cursor_x:cursor_x+cursor_w, c] = (alpha_s * self.cursor_img[:, :, c] +
+                                 alpha_l * frame[cursor_y:cursor_y+cursor_h, cursor_x:cursor_x+cursor_w, c])
 
             self.frames.append(frame)
             self.frame_captured.emit(frame)
