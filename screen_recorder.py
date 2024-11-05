@@ -6,7 +6,7 @@ import os
 import time
 from screeninfo import get_monitors
 from PyQt5.QtWidgets import QApplication, QDialog, QVBoxLayout, QPushButton, QLabel, QComboBox, QStatusBar, QCheckBox, QLCDNumber, QHBoxLayout
-from PyQt5.QtCore import QThread, pyqtSignal, Qt
+from PyQt5.QtCore import QThread, pyqtSignal, Qt, QTimer
 from PyQt5.QtGui import QIcon
 
 class ScreenRecorder(QThread):
@@ -59,24 +59,30 @@ class ScreenRecorder(QThread):
     def stop(self):
         self.recording = False
         self.wait()
-        if self.frames:
-            # Calculate the actual frame rate based on the recording duration
-            actual_duration = time.time() - self.start_time
-            actual_frame_rate = len(self.frames) / actual_duration
 
-            # Write frames to the video file with the adjusted frame rate
-            screen_width, screen_height = pyautogui.size()
-            self.video_writer = cv2.VideoWriter(self.output_file, cv2.VideoWriter_fourcc(*'mp4v'), actual_frame_rate, (screen_width, screen_height))
-            for frame in self.frames:
-                self.video_writer.write(frame)
-            self.video_writer.release()
-        print(f"Recording stopped. Video saved to {self.output_file}")
+class SaveThread(QThread):
+    save_finished = pyqtSignal(str)
+
+    def __init__(self, frames, output_file, actual_frame_rate):
+        super().__init__()
+        self.frames = frames
+        self.output_file = output_file
+        self.actual_frame_rate = actual_frame_rate
+
+    def run(self):
+        screen_width, screen_height = pyautogui.size()
+        video_writer = cv2.VideoWriter(self.output_file, cv2.VideoWriter_fourcc(*'mp4v'), self.actual_frame_rate, (screen_width, screen_height))
+        for frame in self.frames:
+            video_writer.write(frame)
+        video_writer.release()
+        self.save_finished.emit(self.output_file)
 
 class RecorderDialog(QDialog):
     def __init__(self):
         super().__init__(None, Qt.WindowCloseButtonHint)
         self.init_ui()
         self.recorder = None
+        self.save_thread = None
 
     def init_ui(self):
         self.setWindowTitle('Screen Recorder')
@@ -110,10 +116,18 @@ class RecorderDialog(QDialog):
         timer_layout.addWidget(self.timer_display)
         self.layout.addLayout(timer_layout)
 
+        self.waiting_label = QLabel("Saving")
+        self.waiting_label.hide()
+        self.layout.addWidget(self.waiting_label)
+
         self.status_bar = QStatusBar()
         self.layout.addWidget(self.status_bar)
 
         self.setLayout(self.layout)
+
+        self.waiting_timer = QTimer()
+        self.waiting_timer.timeout.connect(self.update_waiting_label)
+        self.waiting_dots = 0
 
     def populate_combo_box(self):
         self.combo_box.addItem('Full Screen')
@@ -136,8 +150,24 @@ class RecorderDialog(QDialog):
         if self.recorder:
             self.recorder.stop()
             self.start_button.setEnabled(True)
-            self.status_bar.showMessage(f"Recording stopped. Video saved to {self.recorder.output_file}")
-            print(f"Recording stopped. Video saved to {self.recorder.output_file}")
+            self.status_bar.showMessage("Saving video...")
+            self.waiting_label.show()
+            self.waiting_timer.start(500)
+
+            # Calculate the actual frame rate based on the recording duration
+            actual_duration = time.time() - self.recorder.start_time
+            actual_frame_rate = len(self.recorder.frames) / actual_duration
+
+            # Start the save thread
+            self.save_thread = SaveThread(self.recorder.frames, self.recorder.output_file, actual_frame_rate)
+            self.save_thread.save_finished.connect(self.on_save_finished)
+            self.save_thread.start()
+
+    def on_save_finished(self, output_file):
+        self.waiting_timer.stop()
+        self.waiting_label.hide()
+        self.status_bar.showMessage(f"Recording stopped. Video saved to {output_file}")
+        print(f"Recording stopped. Video saved to {output_file}")
 
     def get_target_frame(self):
         selected_text = self.combo_box.currentText()
@@ -157,6 +187,10 @@ class RecorderDialog(QDialog):
         minutes, seconds = divmod(elapsed_time, 60)
         milliseconds = (elapsed_time - int(elapsed_time)) * 1000
         self.timer_display.display(f"{int(minutes):02}:{int(seconds):02}.{int(milliseconds):03}")
+
+    def update_waiting_label(self):
+        self.waiting_dots = (self.waiting_dots + 1) % 4
+        self.waiting_label.setText("Saving" + "." * self.waiting_dots)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
