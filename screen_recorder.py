@@ -3,36 +3,68 @@ import cv2
 import numpy as np
 import pyautogui
 import os
+import time
 from screeninfo import get_monitors
-from PyQt5.QtWidgets import QApplication, QDialog, QVBoxLayout, QPushButton, QLabel, QComboBox, QStatusBar
+from PyQt5.QtWidgets import QApplication, QDialog, QVBoxLayout, QPushButton, QLabel, QComboBox, QStatusBar, QCheckBox, QLCDNumber
 from PyQt5.QtCore import QThread, pyqtSignal
 
 class ScreenRecorder(QThread):
     frame_captured = pyqtSignal(np.ndarray)
+    recording_time = pyqtSignal(float)
 
-    def __init__(self, target_frame, output_file):
+    def __init__(self, target_frame, output_file, show_cursor, frame_rate=60.0):
         super().__init__()
         self.target_frame = target_frame
         self.output_file = output_file
+        self.show_cursor = show_cursor
         self.recording = False
         self.video_writer = None
+        self.frame_rate = frame_rate
+        self.frame_interval = 1.0 / frame_rate
+        self.frames = []
+        self.start_time = None
 
     def run(self):
         self.recording = True
+        self.start_time = time.time()
         print("Recording started.")
         screen_width, screen_height = pyautogui.size()
-        self.video_writer = cv2.VideoWriter(self.output_file, cv2.VideoWriter_fourcc(*'mp4v'), 20.0, (screen_width, screen_height))
 
         while self.recording:
+            current_time = time.time()
+            elapsed_time = current_time - self.start_time
+            self.recording_time.emit(elapsed_time)
+
             img = pyautogui.screenshot(region=self.target_frame)
             frame = cv2.cvtColor(np.array(img), cv2.COLOR_BGR2RGB)
-            self.video_writer.write(frame)
+            if self.show_cursor:
+                cursor_x, cursor_y = pyautogui.position()
+                cursor_x -= self.target_frame[0]
+                cursor_y -= self.target_frame[1]
+                cursor_img = pyautogui.screenshot(region=(cursor_x, cursor_y, 16, 16))
+                cursor_img = cv2.cvtColor(np.array(cursor_img), cv2.COLOR_BGR2RGB)
+                frame[cursor_y:cursor_y+16, cursor_x:cursor_x+16] = cursor_img
+
+            self.frames.append(frame)
             self.frame_captured.emit(frame)
+
+            # Ensure consistent frame capture interval
+            elapsed_time = time.time() - current_time
+            time.sleep(max(0, self.frame_interval - elapsed_time))
 
     def stop(self):
         self.recording = False
         self.wait()
-        if self.video_writer:
+        if self.frames:
+            # Calculate the actual frame rate based on the recording duration
+            actual_duration = time.time() - self.start_time
+            actual_frame_rate = len(self.frames) / actual_duration
+
+            # Write frames to the video file with the adjusted frame rate
+            screen_width, screen_height = pyautogui.size()
+            self.video_writer = cv2.VideoWriter(self.output_file, cv2.VideoWriter_fourcc(*'mp4v'), actual_frame_rate, (screen_width, screen_height))
+            for frame in self.frames:
+                self.video_writer.write(frame)
             self.video_writer.release()
         print(f"Recording stopped. Video saved to {self.output_file}")
 
@@ -53,6 +85,9 @@ class RecorderDialog(QDialog):
         self.populate_combo_box()
         self.layout.addWidget(self.combo_box)
 
+        self.cursor_checkbox = QCheckBox('Show Mouse Cursor')
+        self.layout.addWidget(self.cursor_checkbox)
+
         self.start_button = QPushButton('Start Recording')
         self.start_button.clicked.connect(self.start_recording)
         self.layout.addWidget(self.start_button)
@@ -60,6 +95,9 @@ class RecorderDialog(QDialog):
         self.stop_button = QPushButton('Stop Recording')
         self.stop_button.clicked.connect(self.stop_recording)
         self.layout.addWidget(self.stop_button)
+
+        self.timer_display = QLCDNumber()
+        self.layout.addWidget(self.timer_display)
 
         self.status_bar = QStatusBar()
         self.layout.addWidget(self.status_bar)
@@ -75,8 +113,10 @@ class RecorderDialog(QDialog):
     def start_recording(self):
         target_frame = self.get_target_frame()
         output_file = os.path.join(os.path.dirname(__file__), 'screen_recording.mp4')
-        self.recorder = ScreenRecorder(target_frame, output_file)
+        show_cursor = self.cursor_checkbox.isChecked()
+        self.recorder = ScreenRecorder(target_frame, output_file, show_cursor)
         self.recorder.frame_captured.connect(self.process_frame)
+        self.recorder.recording_time.connect(self.update_timer)
         self.recorder.start()
         self.status_bar.showMessage("Recording started.")
 
@@ -99,6 +139,9 @@ class RecorderDialog(QDialog):
     def process_frame(self, frame):
         # Here you can process the frame, e.g., save it to a file or display it
         pass
+
+    def update_timer(self, elapsed_time):
+        self.timer_display.display(f"{elapsed_time:.2f}")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
