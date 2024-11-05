@@ -5,8 +5,9 @@ import pyautogui
 import os
 import time
 from screeninfo import get_monitors
-from PyQt5.QtWidgets import QApplication, QDialog, QVBoxLayout, QPushButton, QLabel, QComboBox, QStatusBar, QCheckBox, QLCDNumber
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtWidgets import QApplication, QDialog, QVBoxLayout, QPushButton, QLabel, QComboBox, QStatusBar, QCheckBox, QLCDNumber, QHBoxLayout
+from PyQt5.QtCore import QThread, pyqtSignal, Qt
+from PyQt5.QtGui import QIcon
 
 class ScreenRecorder(QThread):
     frame_captured = pyqtSignal(np.ndarray)
@@ -43,7 +44,10 @@ class ScreenRecorder(QThread):
                 cursor_y -= self.target_frame[1]
                 cursor_img = pyautogui.screenshot(region=(cursor_x, cursor_y, 16, 16))
                 cursor_img = cv2.cvtColor(np.array(cursor_img), cv2.COLOR_BGR2RGB)
-                frame[cursor_y:cursor_y+16, cursor_x:cursor_x+16] = cursor_img
+
+                # Ensure the cursor image is within the bounds of the frame
+                if 0 <= cursor_x < frame.shape[1] - 16 and 0 <= cursor_y < frame.shape[0] - 16:
+                    frame[cursor_y:cursor_y+16, cursor_x:cursor_x+16] = cursor_img
 
             self.frames.append(frame)
             self.frame_captured.emit(frame)
@@ -70,12 +74,13 @@ class ScreenRecorder(QThread):
 
 class RecorderDialog(QDialog):
     def __init__(self):
-        super().__init__()
+        super().__init__(None, Qt.WindowCloseButtonHint)
         self.init_ui()
         self.recorder = None
 
     def init_ui(self):
         self.setWindowTitle('Screen Recorder')
+        self.setWindowIcon(QIcon('icon.ico'))  # Add a generic icon (ensure 'icon.png' is in the same directory)
         self.layout = QVBoxLayout()
 
         self.label = QLabel('Select Target Frame:')
@@ -97,7 +102,13 @@ class RecorderDialog(QDialog):
         self.layout.addWidget(self.stop_button)
 
         self.timer_display = QLCDNumber()
-        self.layout.addWidget(self.timer_display)
+        self.timer_display.setDigitCount(8)
+        self.timer_display.setSegmentStyle(QLCDNumber.Flat)
+        self.timer_display.display("00:00.000")
+        timer_layout = QHBoxLayout()
+        timer_layout.addWidget(QLabel("Recording Time:"))
+        timer_layout.addWidget(self.timer_display)
+        self.layout.addLayout(timer_layout)
 
         self.status_bar = QStatusBar()
         self.layout.addWidget(self.status_bar)
@@ -118,11 +129,13 @@ class RecorderDialog(QDialog):
         self.recorder.frame_captured.connect(self.process_frame)
         self.recorder.recording_time.connect(self.update_timer)
         self.recorder.start()
+        self.start_button.setEnabled(False)
         self.status_bar.showMessage("Recording started.")
 
     def stop_recording(self):
         if self.recorder:
             self.recorder.stop()
+            self.start_button.setEnabled(True)
             self.status_bar.showMessage(f"Recording stopped. Video saved to {self.recorder.output_file}")
             print(f"Recording stopped. Video saved to {self.recorder.output_file}")
 
@@ -141,7 +154,9 @@ class RecorderDialog(QDialog):
         pass
 
     def update_timer(self, elapsed_time):
-        self.timer_display.display(f"{elapsed_time:.2f}")
+        minutes, seconds = divmod(elapsed_time, 60)
+        milliseconds = (elapsed_time - int(elapsed_time)) * 1000
+        self.timer_display.display(f"{int(minutes):02}:{int(seconds):02}.{int(milliseconds):03}")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
