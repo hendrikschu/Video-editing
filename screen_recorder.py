@@ -1,3 +1,12 @@
+"""
+screen_recorder.py
+
+A screen recording application using PyQt5 and OpenCV. This script captures the screen, optionally overlays the mouse cursor, and saves the recording to a video file.
+
+Current limitations: 
+- records only screen 1
+- does not show cursor in recording
+"""
 import sys
 import cv2
 import numpy as np
@@ -24,7 +33,7 @@ class ScreenRecorder(QThread):
         self.frame_interval = 1.0 / frame_rate
         self.frames = []
         self.start_time = None
-        self.cursor_img = cv2.imread('cursor.png', cv2.IMREAD_UNCHANGED)  # Load the cursor image with alpha channel
+        self.cursor_img = cv2.imread('images//cursor.png', cv2.IMREAD_UNCHANGED)  # Load the cursor image with alpha channel
 
     def run(self):
         self.recording = True
@@ -92,7 +101,7 @@ class RecorderDialog(QDialog):
 
     def init_ui(self):
         self.setWindowTitle('Screen Recorder')
-        self.setWindowIcon(QIcon('icon.ico'))  # Add a generic icon (ensure 'icon.png' is in the same directory)
+        self.setWindowIcon(QIcon('images//icon.ico'))  # Add a generic icon 
         self.layout = QVBoxLayout()
 
         self.label = QLabel('Select Target Frame:')
