@@ -9,8 +9,6 @@ from PyQt5.QtWidgets import QApplication, QDialog, QVBoxLayout, QPushButton, QLa
 from PyQt5.QtCore import QThread, pyqtSignal, Qt, QTimer
 from PyQt5.QtGui import QIcon
 
-CURSOR = cv2.imread('cursor.png', cv2.IMREAD_UNCHANGED)
-
 class ScreenRecorder(QThread):
     frame_captured = pyqtSignal(np.ndarray)
     recording_time = pyqtSignal(float)
@@ -26,7 +24,7 @@ class ScreenRecorder(QThread):
         self.frame_interval = 1.0 / frame_rate
         self.frames = []
         self.start_time = None
-        self.cursor_img = CURSOR
+        self.cursor_img = cv2.imread('cursor.png', cv2.IMREAD_UNCHANGED)  # Load the cursor image with alpha channel
 
     def run(self):
         self.recording = True
@@ -91,7 +89,6 @@ class RecorderDialog(QDialog):
         self.init_ui()
         self.recorder = None
         self.save_thread = None
-        self.cursor_img = CURSOR
 
     def init_ui(self):
         self.setWindowTitle('Screen Recorder')
@@ -189,12 +186,6 @@ class RecorderDialog(QDialog):
             return (monitor.x, monitor.y, monitor.width, monitor.height)
 
     def process_frame(self, frame):
-        # Get the current mouse position
-        mouse_x, mouse_y = pyautogui.position()
-        
-        # Draw the cursor on the frame using self.cursor_img
-        draw_cursor(frame, mouse_x, mouse_y, self.cursor_img)
-        
         # Here you can process the frame, e.g., save it to a file or display it
         pass
 
@@ -206,40 +197,6 @@ class RecorderDialog(QDialog):
     def update_waiting_label(self):
         self.waiting_dots = (self.waiting_dots + 1) % 4
         self.waiting_label.setText("Saving" + "." * self.waiting_dots)
-
-def draw_cursor(frame, mouse_x, mouse_y, cursor_img):
-    # Get the dimensions of the cursor image
-    cursor_height, cursor_width = cursor_img.shape[:2]
-    
-    # Calculate the position to overlay the cursor image
-    top_left_x = mouse_x - cursor_width // 2
-    top_left_y = mouse_y - cursor_height // 2
-    
-    # Ensure the overlay is within the frame boundaries
-    if top_left_x < 0:
-        top_left_x = 0
-    if top_left_y < 0:
-        top_left_y = 0
-    if top_left_x + cursor_width > frame.shape[1]:
-        cursor_width = frame.shape[1] - top_left_x
-    if top_left_y + cursor_height > frame.shape[0]:
-        cursor_height = frame.shape[0] - top_left_y
-    
-    # Overlay the cursor image on the frame
-    overlay = frame[top_left_y:top_left_y + cursor_height, top_left_x:top_left_x + cursor_width]
-    cursor_img_resized = cv2.resize(cursor_img, (cursor_width, cursor_height))
-    
-    if cursor_img_resized.shape[2] == 4:  # Check if the image has an alpha channel
-        mask = cursor_img_resized[:, :, 3]
-    else:
-        # Create a mask based on a color key (e.g., white background)
-        mask = cv2.inRange(cursor_img_resized, (255, 255, 255), (255, 255, 255))
-    
-    mask_inv = cv2.bitwise_not(mask)
-    img_bg = cv2.bitwise_and(overlay, overlay, mask=mask_inv)
-    img_fg = cv2.bitwise_and(cursor_img_resized, cursor_img_resized, mask=mask)
-    dst = cv2.add(img_bg, img_fg)
-    frame[top_left_y:top_left_y + cursor_height, top_left_x:top_left_x + cursor_width] = dst
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
